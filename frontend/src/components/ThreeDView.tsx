@@ -122,7 +122,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
   const animFrameRef = useRef<number>(0);
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
   const routeGroupRef = useRef<THREE.Group | null>(null);
-  const [terrainMetrics, setTerrainMetrics] = useState<{ widthMeters: number; heightMeters: number; bounds: GeoBounds; minElev: number; maxElev: number } | null>(null);
+  const [terrainMetrics, setTerrainMetrics] = useState<{ widthMeters: number; heightMeters: number; bounds: GeoBounds; minElev: number; maxElev: number; centerEasting: number; centerNorthing: number; utmProjDef: string; } | null>(null);
   const elevDataRef = useRef<Float32Array | null>(null);
   const elevColsRef = useRef(0);
   const elevRowsRef = useRef(0);
@@ -140,6 +140,15 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
   useEffect(() => { viewshedClassColorsRef.current = viewshedClassColors; }, [viewshedClassColors]);
   useEffect(() => { viewshedOpacityRef.current = viewshedOpacity; }, [viewshedOpacity]);
   useEffect(() => { getViewshedClassColorRef.current = getViewshedClassColor; }, [getViewshedClassColor]);
+
+  // Fetch CRS from backend
+  const [crs, setCrs] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/crs')
+      .then(res => res.json())
+      .then(data => setCrs(data.crs))
+      .catch(() => setCrs(null));
+  }, []);
 
   // ── Build terrain mesh ────────────────────────────────────────────
 
@@ -183,7 +192,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
     }
     if (!Number.isFinite(minElev)) { minElev = 0; maxElev = 100; }
 
-    setTerrainMetrics({ widthMeters: metrics.widthMeters, heightMeters: metrics.heightMeters, bounds, minElev, maxElev });
+    setTerrainMetrics({ widthMeters: metrics.widthMeters, heightMeters: metrics.heightMeters, centerEasting: metrics.centerEasting, centerNorthing: metrics.centerNorthing, utmProjDef: metrics.utmProjDef, bounds, minElev, maxElev });
 
     // Remove old mesh
     if (terrainMeshRef.current) {
@@ -251,7 +260,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
 
     // Load map tiles asynchronously
     loadMapTileTexture(bounds);
-  }, [rasterData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rasterData, crs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load map tile texture ─────────────────────────────────────────
 
@@ -259,7 +268,8 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
     const activeMap = baseMaps.find(b => b.id === activeBaseMapId) ?? baseMaps[0];
     if (!activeMap || !terrainMeshRef.current) return;
 
-    const { zoom, minTile, maxTile, cols: tileCols, rows: tileRows } = computeTileRange(bounds);
+    const isCRS84 = crs === 'EPSG:4326';
+    const { zoom, minTile, maxTile, cols: tileCols, rows: tileRows } = computeTileRange(bounds, 6, isCRS84);
 
     const canvas = document.createElement('canvas');
     canvas.width = TEXTURE_SIZE;
@@ -342,10 +352,10 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           const [minLng, minLat, maxLng, maxLat] = bounds;
-          const tileLngMin = tileToLng(tx, zoom);
-          const tileLngMax = tileToLng(tx + 1, zoom);
-          const tileLatMax = tileToLat(ty, zoom);       // north edge (ty increases southward)
-          const tileLatMin = tileToLat(ty + 1, zoom);   // south edge
+          const tileLngMin = tileToLng(tx, zoom, isCRS84);
+          const tileLngMax = tileToLng(tx + 1, zoom, isCRS84);
+          const tileLatMax = tileToLat(ty, zoom, isCRS84);       // north edge (ty increases southward)
+          const tileLatMin = tileToLat(ty + 1, zoom, isCRS84);   // south edge
           const px = (tileLngMin - minLng) / (maxLng - minLng) * TEXTURE_SIZE;
           const py = (maxLat - tileLatMax) / (maxLat - minLat) * TEXTURE_SIZE;
           const pw = (tileLngMax - tileLngMin) / (maxLng - minLng) * TEXTURE_SIZE;
@@ -362,7 +372,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
         img.src = tileUrl;
       }
     }
-  }, [baseMaps, activeBaseMapId, mapToken]);
+  }, [baseMaps, activeBaseMapId, mapToken, crs]);
 
   // ── Rebuild texture on basemap change ─────────────────────────────
 
@@ -406,7 +416,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
         if (profilePoints.length >= 2) {
           const positions: number[] = [];
           for (const ep of profilePoints) {
-            const local = geoToLocal(ep.longitude, ep.latitude, m.bounds, m.widthMeters, m.heightMeters);
+            const local = geoToLocal(ep.longitude, ep.latitude, m.utmProjDef, m.centerEasting, m.centerNorthing);
             const z = (ep.plannedAltitude! * VERTICAL_EXAGGERATION) + ROUTE_OFFSET_ABOVE_TERRAIN;
             positions.push(local.x, local.y, z);
           }
@@ -417,7 +427,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
 
           // Waypoint markers at actual waypoint positions
           for (const pt of route.points) {
-            const local = geoToLocal(pt.lng, pt.lat, m.bounds, m.widthMeters, m.heightMeters);
+            const local = geoToLocal(pt.lng, pt.lat, m.utmProjDef, m.centerEasting, m.centerNorthing);
             const z = ((pt.height ?? m.minElev) * VERTICAL_EXAGGERATION) + ROUTE_OFFSET_ABOVE_TERRAIN;
             const sphere = new THREE.Mesh(
               new THREE.SphereGeometry(m.widthMeters * 0.005, 8, 8),
@@ -433,7 +443,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
       // Fallback: render from waypoint heights (non-active routes or no profile)
       const positions: number[] = [];
       for (const pt of route.points) {
-        const local = geoToLocal(pt.lng, pt.lat, m.bounds, m.widthMeters, m.heightMeters);
+        const local = geoToLocal(pt.lng, pt.lat, m.utmProjDef, m.centerEasting, m.centerNorthing);
         const z = ((pt.height ?? m.minElev) * VERTICAL_EXAGGERATION) + ROUTE_OFFSET_ABOVE_TERRAIN;
         positions.push(local.x, local.y, z);
       }

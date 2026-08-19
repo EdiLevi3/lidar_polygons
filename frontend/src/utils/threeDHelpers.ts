@@ -13,16 +13,26 @@ export interface TileCoord {
 /** Geographic bounds [minLng, minLat, maxLng, maxLat] */
 export type GeoBounds = [number, number, number, number];
 
-/** Metric dimensions of the terrain */
+/** Metric dimensions and UTM projection info of the terrain */
 export interface TerrainMetrics {
   widthMeters: number;
   heightMeters: number;
+  centerEasting: number;
+  centerNorthing: number;
+  utmProjDef: string;
 }
 
 // ── Tile math ──────────────────────────────────────────────────────────
 
-/** Compute slippy-map tile x/y from lng/lat at a given zoom. */
-export function lngLatToTile(lng: number, lat: number, zoom: number): { x: number; y: number } {
+/** Compute tile x/y from lng/lat at a given zoom for Web Mercator or CRS84. */
+export function lngLatToTile(lng: number, lat: number, zoom: number, isCRS84: boolean = false): { x: number; y: number } {
+  if (isCRS84) {
+    const nx = Math.pow(2, zoom + 1);
+    const ny = Math.pow(2, zoom);
+    const x = Math.floor(((lng + 180) / 360) * nx);
+    const y = Math.floor(((90 - lat) / 180) * ny);
+    return { x, y };
+  }
   const n = Math.pow(2, zoom);
   const x = Math.floor(((lng + 180) / 360) * n);
   const latRad = (lat * Math.PI) / 180;
@@ -30,8 +40,15 @@ export function lngLatToTile(lng: number, lat: number, zoom: number): { x: numbe
   return { x, y };
 }
 
-/** Fractional slippy-map tile position from lng/lat at zoom (no floor). */
-export function lngLatToTileFrac(lng: number, lat: number, zoom: number): { x: number; y: number } {
+/** Fractional tile position from lng/lat at zoom (no floor). */
+export function lngLatToTileFrac(lng: number, lat: number, zoom: number, isCRS84: boolean = false): { x: number; y: number } {
+  if (isCRS84) {
+    const nx = Math.pow(2, zoom + 1);
+    const ny = Math.pow(2, zoom);
+    const x = ((lng + 180) / 360) * nx;
+    const y = ((90 - lat) / 180) * ny;
+    return { x, y };
+  }
   const n = Math.pow(2, zoom);
   const x = ((lng + 180) / 360) * n;
   const latRad = (lat * Math.PI) / 180;
@@ -40,18 +57,20 @@ export function lngLatToTileFrac(lng: number, lat: number, zoom: number): { x: n
 }
 
 /** Convert tile x index to the west longitude of that tile. */
-export function tileToLng(tx: number, zoom: number): number {
+export function tileToLng(tx: number, zoom: number, isCRS84: boolean = false): number {
+  if (isCRS84) return (tx / Math.pow(2, zoom + 1)) * 360 - 180;
   return (tx / Math.pow(2, zoom)) * 360 - 180;
 }
 
-/** Convert tile y index to the north latitude of that tile (inverse Mercator). */
-export function tileToLat(ty: number, zoom: number): number {
+/** Convert tile y index to the north latitude of that tile. */
+export function tileToLat(ty: number, zoom: number, isCRS84: boolean = false): number {
+  if (isCRS84) return 90 - (ty / Math.pow(2, zoom)) * 180; 
   const n = Math.PI - (2 * Math.PI * ty) / Math.pow(2, zoom);
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
 /** Compute tile bounds for given geographic bounds and target tile count per axis (~4-8). */
-export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number = 6): {
+export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number = 6, isCRS84: boolean = false): {
   zoom: number;
   minTile: { x: number; y: number };
   maxTile: { x: number; y: number };
@@ -63,8 +82,8 @@ export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number =
   // Find zoom level that gives roughly targetTilesPerAxis tiles across the wider dimension
   let bestZoom = 1;
   for (let z = 1; z <= 18; z++) {
-    const tl = lngLatToTile(minLng, maxLat, z);
-    const br = lngLatToTile(maxLng, minLat, z);
+    const tl = lngLatToTile(minLng, maxLat, z, isCRS84);
+    const br = lngLatToTile(maxLng, minLat, z, isCRS84);
     const cols = br.x - tl.x + 1;
     const rows = br.y - tl.y + 1;
     if (Math.max(cols, rows) <= targetTilesPerAxis * 2) {
@@ -73,8 +92,8 @@ export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number =
     if (Math.max(cols, rows) >= targetTilesPerAxis) break;
   }
 
-  const tl = lngLatToTile(minLng, maxLat, bestZoom);
-  const br = lngLatToTile(maxLng, minLat, bestZoom);
+  const tl = lngLatToTile(minLng, maxLat, bestZoom, isCRS84);
+  const br = lngLatToTile(maxLng, minLat, bestZoom, isCRS84);
   return {
     zoom: bestZoom,
     minTile: tl,
@@ -96,20 +115,33 @@ export function buildTileUrl(urlTemplate: string, x: number, y: number, z: numbe
 
 // ── Terrain mesh data ──────────────────────────────────────────────────
 
-/** Convert WGS84 bounds to metric width/height using proj4 UTM projection. */
+/** Convert WGS84 bounds to metric width/height and UTM center coordinates using proj4. */
 export function boundsToMetric(bounds: GeoBounds): TerrainMetrics {
   const [minLng, minLat, maxLng, maxLat] = bounds;
   const centerLng = (minLng + maxLng) / 2;
+  const centerLat = (minLat + maxLat) / 2;
   // Determine UTM zone from center longitude
   const zone = Math.floor((centerLng + 180) / 6) + 1;
-  const hem = (minLat + maxLat) / 2 >= 0 ? 'north' : 'south';
+  const hem = centerLat >= 0 ? 'north' : 'south';
   const utmDef = `+proj=utm +zone=${zone} +${hem} +datum=WGS84 +units=m +no_defs`;
 
   const bl = proj4('EPSG:4326', utmDef, [minLng, minLat]);
+  const br = proj4('EPSG:4326', utmDef, [maxLng, minLat]);
+  const tl = proj4('EPSG:4326', utmDef, [minLng, maxLat]);
   const tr = proj4('EPSG:4326', utmDef, [maxLng, maxLat]);
+  const minE = Math.min(bl[0], br[0], tl[0], tr[0]);
+  const maxE = Math.max(bl[0], br[0], tl[0], tr[0]);
+  const minN = Math.min(bl[1], br[1], tl[1], tr[1]);
+  const maxN = Math.max(bl[1], br[1], tl[1], tr[1]);
+
+  const [centerEasting, centerNorthing] = proj4('EPSG:4326', utmDef, [centerLng, centerLat]);
+
   return {
-    widthMeters: Math.abs(tr[0] - bl[0]),
-    heightMeters: Math.abs(tr[1] - bl[1]),
+    widthMeters: Math.abs(maxE - minE),
+    heightMeters: Math.abs(maxN - minN),
+    centerEasting,
+    centerNorthing,
+    utmProjDef: utmDef,
   };
 }
 
@@ -159,22 +191,34 @@ export function downsampleRaster(
 }
 
 /**
- * Convert lng/lat to local 3D coordinates within the terrain mesh.
- * Returns { x, y } in mesh coordinate system (centered at origin).
+ * Convert lng/lat directly to local 3D coordinates within the terrain mesh using pure UTM projection.
+ * Returns { x, y } in mesh coordinate system (meters, centered at (0, 0)).
  */
 export function geoToLocal(
   lng: number,
   lat: number,
-  bounds: GeoBounds,
-  widthMeters: number,
-  heightMeters: number
+  utmProjDefOrBounds: string | GeoBounds,
+  centerEastingOrWidth: number,
+  centerNorthingOrHeight?: number
 ): { x: number; y: number } {
-  const [minLng, minLat, maxLng, maxLat] = bounds;
-  const u = (lng - minLng) / (maxLng - minLng); // 0..1
-  const v = (lat - minLat) / (maxLat - minLat); // 0..1
+  if (typeof utmProjDefOrBounds === 'string') {
+    const utmProjDef = utmProjDefOrBounds;
+    const centerEasting = centerEastingOrWidth;
+    const centerNorthing = centerNorthingOrHeight ?? 0;
+    const [easting, northing] = proj4('EPSG:4326', utmProjDef, [lng, lat]);
+    return {
+      x: easting - centerEasting,
+      y: northing - centerNorthing,
+    };
+  }
+
+  // Fallback if bounds array was passed:
+  const bounds = utmProjDefOrBounds;
+  const metrics = boundsToMetric(bounds);
+  const [easting, northing] = proj4('EPSG:4326', metrics.utmProjDef, [lng, lat]);
   return {
-    x: (u - 0.5) * widthMeters,
-    y: (v - 0.5) * heightMeters,
+    x: easting - metrics.centerEasting,
+    y: northing - metrics.centerNorthing,
   };
 }
 
