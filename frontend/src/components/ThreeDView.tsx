@@ -462,6 +462,23 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
     }
   }, [viewshedRaster, viewshedVisible, viewshedClassColors, viewshedOpacity, loadMapTileTexture, terrainMetrics]);
 
+  // ── Reset Camera to North ─────────────────────────────────────────
+
+  const resetToNorth = useCallback(() => {
+    if (!terrainMetrics || !cameraRef.current || !controlsRef.current) return;
+    const maxDim = Math.max(terrainMetrics.widthMeters, terrainMetrics.heightMeters);
+    const elevRange = (terrainMetrics.maxElev - terrainMetrics.minElev) * VERTICAL_EXAGGERATION;
+    const camDist = maxDim * 0.8;
+    const targetZ = (terrainMetrics.minElev + terrainMetrics.maxElev) / 2 * VERTICAL_EXAGGERATION;
+
+    cameraRef.current.position.set(0, -maxDim * 0.5, elevRange + camDist * 0.5);
+    cameraRef.current.up.set(0, 0, 1);
+    cameraRef.current.far = maxDim * 5;
+    cameraRef.current.updateProjectionMatrix();
+    controlsRef.current.target.set(0, 0, targetZ);
+    controlsRef.current.update();
+  }, [terrainMetrics]);
+
   // ── Initialize Three.js scene ─────────────────────────────────────
 
   useEffect(() => {
@@ -598,6 +615,24 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
       <div className="three-d-view-banner">
         תצוגה בלבד — לעריכה חזור ל-2D
       </div>
+      {/* Return to Initial / North Button */}
+      <button
+        type="button"
+        className="three-d-north-btn"
+        onClick={resetToNorth}
+        title="החזר למצב ההתחלתי"
+        aria-label="החזר למצב ההתחלתי"
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+          {/* North needle (Red, pointing North) */}
+          <polygon points="12,2 16,12 12,9.5 8,12" fill="#ef4444" />
+          {/* South needle (Slate, pointing South) */}
+          <polygon points="12,22 16,12 12,14.5 8,12" fill="#94a3b8" />
+          {/* Center pivot pin */}
+          <circle cx="12" cy="12" r="2" fill="#334155" />
+          <circle cx="12" cy="12" r="0.8" fill="#ffffff" />
+        </svg>
+      </button>
       {nextBaseMap && nextBaseMapPreviewUrl && (
         <button
           type="button"
