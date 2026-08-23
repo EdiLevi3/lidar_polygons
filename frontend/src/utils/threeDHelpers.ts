@@ -115,15 +115,6 @@ export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number =
   };
 }
 
-/** Build a tile URL from a template like `https://…/{z}/{x}/{y}.png`. */
-export function buildTileUrl(urlTemplate: string, x: number, y: number, z: number, token: string | null): string {
-  let url = urlTemplate.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
-  if (token && token.trim()) {
-    const sep = url.includes('?') ? '&' : '?';
-    url = `${url}${sep}token=${token}`;
-  }
-  return url;
-}
 
 // ── Terrain mesh data ──────────────────────────────────────────────────
 
