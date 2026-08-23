@@ -266,10 +266,9 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
 
   const loadMapTileTexture = useCallback((bounds: GeoBounds) => {
     const activeMap = baseMaps.find(b => b.id === activeBaseMapId) ?? baseMaps[0];
-    if (!activeMap || !terrainMeshRef.current) return;
+    if (!activeMap || !terrainMeshRef.current || !crs) return;
 
-    const isCRS84 = crs === 'EPSG:4326';
-    const { zoom, minTile, maxTile, cols: tileCols, rows: tileRows } = computeTileRange(bounds, 6, isCRS84);
+    const { zoom, minTile, maxTile, cols: tileCols, rows: tileRows } = computeTileRange(bounds, 6, crs);
 
     const canvas = document.createElement('canvas');
     canvas.width = TEXTURE_SIZE;
@@ -352,10 +351,10 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           const [minLng, minLat, maxLng, maxLat] = bounds;
-          const tileLngMin = tileToLng(tx, zoom, isCRS84);
-          const tileLngMax = tileToLng(tx + 1, zoom, isCRS84);
-          const tileLatMax = tileToLat(ty, zoom, isCRS84);       // north edge (ty increases southward)
-          const tileLatMin = tileToLat(ty + 1, zoom, isCRS84);   // south edge
+          const tileLngMin = tileToLng(tx, zoom, crs);
+          const tileLngMax = tileToLng(tx + 1, zoom, crs);
+          const tileLatMax = tileToLat(ty, zoom, crs);       // north edge (ty increases southward)
+          const tileLatMin = tileToLat(ty + 1, zoom, crs);   // south edge
           const px = (tileLngMin - minLng) / (maxLng - minLng) * TEXTURE_SIZE;
           const py = (maxLat - tileLatMax) / (maxLat - minLat) * TEXTURE_SIZE;
           const pw = (tileLngMax - tileLngMin) / (maxLng - minLng) * TEXTURE_SIZE;

@@ -24,53 +24,65 @@ export interface TerrainMetrics {
 
 // ── Tile math ──────────────────────────────────────────────────────────
 
-/** Compute tile x/y from lng/lat at a given zoom for Web Mercator or CRS84. */
-export function lngLatToTile(lng: number, lat: number, zoom: number, isCRS84: boolean = false): { x: number; y: number } {
-  if (isCRS84) {
+/** Compute tile x/y from lng/lat at a given zoom for Web Mercator (EPSG:3857) or CRS84/WGS84 (EPSG:4326). */
+export function lngLatToTile(lng: number, lat: number, zoom: number, crs: string): { x: number; y: number } {
+  if (crs === "EPSG:4326") {
     const nx = Math.pow(2, zoom + 1);
     const ny = Math.pow(2, zoom);
     const x = Math.floor(((lng + 180) / 360) * nx);
     const y = Math.floor(((90 - lat) / 180) * ny);
     return { x, y };
-  }
-  const n = Math.pow(2, zoom);
-  const x = Math.floor(((lng + 180) / 360) * n);
-  const latRad = (lat * Math.PI) / 180;
-  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-  return { x, y };
+  } else if (crs === "EPSG:3857") {
+    const n = Math.pow(2, zoom);
+    const x = Math.floor(((lng + 180) / 360) * n);
+    const latRad = (lat * Math.PI) / 180;
+    const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+    return { x, y };
+  } 
+  throw new Error(`Unsupported EPSG code: ${crs}. Only EPSG:4326 and EPSG:3857 are supported.`);
 }
 
 /** Fractional tile position from lng/lat at zoom (no floor). */
-export function lngLatToTileFrac(lng: number, lat: number, zoom: number, isCRS84: boolean = false): { x: number; y: number } {
-  if (isCRS84) {
+export function lngLatToTileFrac(lng: number, lat: number, zoom: number, crs: string): { x: number; y: number } {
+  if (crs === "EPSG:4326") {
     const nx = Math.pow(2, zoom + 1);
     const ny = Math.pow(2, zoom);
     const x = ((lng + 180) / 360) * nx;
     const y = ((90 - lat) / 180) * ny;
     return { x, y };
-  }
-  const n = Math.pow(2, zoom);
-  const x = ((lng + 180) / 360) * n;
-  const latRad = (lat * Math.PI) / 180;
-  const y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
-  return { x, y };
+  } else if (crs === "EPSG:3857") {
+    const n = Math.pow(2, zoom);
+    const x = ((lng + 180) / 360) * n;
+    const latRad = (lat * Math.PI) / 180;
+    const y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
+    return { x, y };
+  } 
+  throw new Error(`Unsupported EPSG code: ${crs}. Only EPSG:4326 and EPSG:3857 are supported.`);
 }
 
 /** Convert tile x index to the west longitude of that tile. */
-export function tileToLng(tx: number, zoom: number, isCRS84: boolean = false): number {
-  if (isCRS84) return (tx / Math.pow(2, zoom + 1)) * 360 - 180;
-  return (tx / Math.pow(2, zoom)) * 360 - 180;
+export function tileToLng(tx: number, zoom: number, crs: string): number {
+  if (crs === "EPSG:4326") {
+    return (tx / Math.pow(2, zoom + 1)) * 360 - 180;
+  } else if (crs === "EPSG:3857") {
+    return (tx / Math.pow(2, zoom)) * 360 - 180;
+  }
+  throw new Error(`Unsupported EPSG code: ${crs}. Only EPSG:4326 and EPSG:3857 are supported.`);
 }
 
 /** Convert tile y index to the north latitude of that tile. */
-export function tileToLat(ty: number, zoom: number, isCRS84: boolean = false): number {
-  if (isCRS84) return 90 - (ty / Math.pow(2, zoom)) * 180; 
-  const n = Math.PI - (2 * Math.PI * ty) / Math.pow(2, zoom);
-  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+export function tileToLat(ty: number, zoom: number, crs: string): number {
+  if (crs === "EPSG:4326") {
+    return 90 - (ty / Math.pow(2, zoom)) * 180;
+  } else if (crs === "EPSG:3857") {
+    const n = Math.PI - (2 * Math.PI * ty) / Math.pow(2, zoom);
+    return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  }
+  throw new Error(`Unsupported EPSG code: ${crs}. Only EPSG:4326 and EPSG:3857 are supported.`);
 }
 
 /** Compute tile bounds for given geographic bounds and target tile count per axis (~4-8). */
-export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number = 6, isCRS84: boolean = false): {
+export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number = 6, crs: string): {
   zoom: number;
   minTile: { x: number; y: number };
   maxTile: { x: number; y: number };
@@ -82,8 +94,8 @@ export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number =
   // Find zoom level that gives roughly targetTilesPerAxis tiles across the wider dimension
   let bestZoom = 1;
   for (let z = 1; z <= 18; z++) {
-    const tl = lngLatToTile(minLng, maxLat, z, isCRS84);
-    const br = lngLatToTile(maxLng, minLat, z, isCRS84);
+    const tl = lngLatToTile(minLng, maxLat, z, crs);
+    const br = lngLatToTile(maxLng, minLat, z, crs);
     const cols = br.x - tl.x + 1;
     const rows = br.y - tl.y + 1;
     if (Math.max(cols, rows) <= targetTilesPerAxis * 2) {
@@ -92,8 +104,8 @@ export function computeTileRange(bounds: GeoBounds, targetTilesPerAxis: number =
     if (Math.max(cols, rows) >= targetTilesPerAxis) break;
   }
 
-  const tl = lngLatToTile(minLng, maxLat, bestZoom, isCRS84);
-  const br = lngLatToTile(maxLng, minLat, bestZoom, isCRS84);
+  const tl = lngLatToTile(minLng, maxLat, bestZoom, crs);
+  const br = lngLatToTile(maxLng, minLat, bestZoom, crs);
   return {
     zoom: bestZoom,
     minTile: tl,
