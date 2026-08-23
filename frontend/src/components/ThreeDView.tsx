@@ -123,8 +123,6 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
   const routeGroupRef = useRef<THREE.Group | null>(null);
   const [terrainMetrics, setTerrainMetrics] = useState<{ widthMeters: number; heightMeters: number; bounds: GeoBounds; minElev: number; maxElev: number; centerEasting: number; centerNorthing: number; utmProjDef: string; } | null>(null);
-  const [heading, setHeading] = useState<number>(0);
-  const resetAnimRef = useRef<number | null>(null);
   const elevDataRef = useRef<Float32Array | null>(null);
   const elevColsRef = useRef(0);
   const elevRowsRef = useRef(0);
@@ -258,7 +256,6 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
       cameraRef.current.updateProjectionMatrix();
       controlsRef.current.target.set(0, 0, targetZ);
       controlsRef.current.update();
-      setHeading(0);
     }
 
     // Load map tiles asynchronously
