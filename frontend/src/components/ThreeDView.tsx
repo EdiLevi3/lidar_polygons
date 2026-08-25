@@ -54,6 +54,8 @@ interface ElevationPoint3D {
   longitude: number;
   latitude: number;
   plannedAltitude?: number;
+  elevation?: number;
+  flightHeight?: number;
 }
 
 interface ViewshedRasterData {
@@ -76,6 +78,7 @@ export interface ThreeDViewProps {
   routes: RouteData[];
   activeRouteId: string;
   elevationProfile: ElevationPoint3D[];
+  hoveredElevationPoint?: ElevationPoint3D | null;
   onBaseMapCycle: () => void;
   viewshedRaster: ViewshedRasterData | null;
   viewshedVisible: boolean;
@@ -106,6 +109,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
   routes,
   activeRouteId,
   elevationProfile,
+  hoveredElevationPoint,
   onBaseMapCycle,
   viewshedRaster,
   viewshedVisible,
@@ -122,6 +126,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
   const animFrameRef = useRef<number>(0);
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
   const routeGroupRef = useRef<THREE.Group | null>(null);
+  const hoverMarkerMeshRef = useRef<THREE.Mesh | null>(null);
   const [terrainMetrics, setTerrainMetrics] = useState<{ widthMeters: number; heightMeters: number; bounds: GeoBounds; minElev: number; maxElev: number; centerEasting: number; centerNorthing: number; utmProjDef: string; } | null>(null);
   const elevDataRef = useRef<Float32Array | null>(null);
   const elevColsRef = useRef(0);
@@ -454,6 +459,29 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
     sceneRef.current.add(group);
   }, [routes, activeRouteId, elevationProfile, terrainMetrics]);
 
+  // ── Hover marker (purple dot on route) ────────────────────────────
+
+  useEffect(() => {
+    if (!sceneRef.current || !terrainMetrics || !hoveredElevationPoint) {
+      if (hoverMarkerMeshRef.current) hoverMarkerMeshRef.current.visible = false;
+      return;
+    }
+    const m = terrainMetrics;
+    const alt = hoveredElevationPoint.plannedAltitude ?? hoveredElevationPoint.elevation ?? m.minElev;
+    const local = geoToLocal(hoveredElevationPoint.longitude, hoveredElevationPoint.latitude, m.utmProjDef, m.centerEasting, m.centerNorthing);
+    const z = (alt * VERTICAL_EXAGGERATION) + ROUTE_OFFSET_ABOVE_TERRAIN;
+
+    if (!hoverMarkerMeshRef.current) {
+      const geom = new THREE.SphereGeometry(m.widthMeters * 0.007, 12, 12);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x9B59B6 });
+      const mesh = new THREE.Mesh(geom, mat);
+      sceneRef.current.add(mesh);
+      hoverMarkerMeshRef.current = mesh;
+    }
+    hoverMarkerMeshRef.current.position.set(local.x, local.y, z);
+    hoverMarkerMeshRef.current.visible = true;
+  }, [hoveredElevationPoint, terrainMetrics]);
+
   // ── Recomposite terrain texture when viewshed state changes ──────
 
   useEffect(() => {
@@ -579,6 +607,7 @@ const ThreeDView: React.FC<ThreeDViewProps> = ({
       rendererRef.current = null;
       terrainMeshRef.current = null;
       routeGroupRef.current = null;
+      hoverMarkerMeshRef.current = null;
       elevDataRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
